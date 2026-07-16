@@ -1,3 +1,7 @@
+> **Disclaimer:** I am **not** affiliated with PrismLauncher in any way.
+
+This is a fork of Prism Launcher with the Microsoft authentication check removed. The reason for this fork is that the Microsoft auth check is, in my opinion, malware — it phone-homes to Microsoft's servers without user consent. This fork has been built without that check.
+
 <p align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="/program_info/org.prismlauncher.PrismLauncher.logo-darkmode.svg">
