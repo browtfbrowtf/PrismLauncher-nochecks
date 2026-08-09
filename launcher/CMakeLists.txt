@@ -42,8 +42,6 @@ set(CORE_SOURCES
     EnumWrapper.h
 
     # Basic instance manipulation tasks (derived from InstanceTask)
-    InstanceCreationTask.h
-    InstanceCreationTask.cpp
     InstanceCopyPrefs.h
     InstanceCopyPrefs.cpp
     InstanceCopyTask.h
@@ -978,8 +976,10 @@ SET(LAUNCHER_SOURCES
     ui/pages/modplatform/ResourcePackModel.cpp
 
     # Needed for MOC to find them without a corresponding .cpp
+    ui/pages/modplatform/TexturePackPage.cpp
     ui/pages/modplatform/TexturePackPage.h
     ui/pages/modplatform/TexturePackModel.cpp
+    ui/pages/modplatform/TexturePackModel.h
 
     ui/pages/modplatform/ShaderPackPage.cpp
     ui/pages/modplatform/ShaderPackModel.cpp
@@ -1100,6 +1100,8 @@ SET(LAUNCHER_SOURCES
     ui/dialogs/InstallLoaderDialog.h
     ui/dialogs/ChooseOfflineNameDialog.cpp
     ui/dialogs/ChooseOfflineNameDialog.h
+    ui/dialogs/UntrustedModsDialog.cpp
+    ui/dialogs/UntrustedModsDialog.h
 
     ui/dialogs/skins/SkinManageDialog.cpp
     ui/dialogs/skins/SkinManageDialog.h
@@ -1267,7 +1269,7 @@ if(TARGET PkgConfig::libqrencode)
     target_link_libraries(Launcher_logic PkgConfig::libqrencode)
 else()
     target_include_directories(Launcher_logic PRIVATE ${LIBQRENCODE_INCLUDE_DIR})
-    target_link_libraries(Launcher_logic ${LIBQRENCODE_LIBRARIES})
+    target_link_libraries(Launcher_logic ${LIBQRENCODE_LIBRARY})
 endif()
 
 if(TARGET PkgConfig::tomlplusplus)
