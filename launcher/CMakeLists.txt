@@ -136,8 +136,8 @@ set(NET_SOURCES
     net/RawHeaderProxy.h
     net/ApiHeaderProxy.h
     net/ApiRequest.h
-    net/NetRequest.cpp
-    net/NetRequest.h
+    net/Request.cpp
+    net/Request.h
 )
 
 # Game launch logic
@@ -462,8 +462,6 @@ set(TOOLS_SOURCES
     tools/JProfiler.h
     tools/JVisualVM.cpp
     tools/JVisualVM.h
-    tools/MCEditTool.cpp
-    tools/MCEditTool.h
     tools/GenericProfiler.cpp
     tools/GenericProfiler.h
 )
@@ -641,8 +639,8 @@ set(PRISMUPDATER_SOURCES
     net/HttpMetaCache.h
     net/Logging.h
     net/Logging.cpp
-    net/NetRequest.cpp
-    net/NetRequest.h
+    net/Request.cpp
+    net/Request.h
     net/NetJob.cpp
     net/NetJob.h
     net/NetUtils.h
@@ -1298,7 +1296,7 @@ target_link_libraries(Launcher_logic
     Launcher_rainbow
 )
 if (TARGET ${Launcher_QT_DBUS})
-    add_compile_definitions(WITH_QTDBUS)
+    target_compile_definitions(Launcher_logic PUBLIC WITH_QTDBUS)
 endif()
 
 if(APPLE)
