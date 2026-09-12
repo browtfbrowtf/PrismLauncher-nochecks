@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 /*
  *  Prism Launcher - Minecraft Launcher
- *  Copyright (c) 2022 flowln <flowlnlnln@gmail.com>
+ *  Copyright (C) 2022 Sefa Eyeoglu <contact@scrumplex.net>
  *
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -35,38 +35,24 @@
 
 #pragma once
 
-#include "Screenshot.h"
-#include "net/Request.h"
+#include <LoggedProcess.h>
+#include <launch/LaunchStep.h>
 
-class ImgurAlbumCreation : public Net::Request {
+class LaunchCommand : public LaunchStep {
+    Q_OBJECT
    public:
-    virtual ~ImgurAlbumCreation() = default;
+    LaunchCommand(LaunchTask* parent, QString command, QString phaseName = {});
+    ~LaunchCommand() override = default;
 
-    struct Result {
-        QString deleteHash;
-        QString id;
-    };
-
-    class Sink : public Net::Sink {
-       public:
-        Sink(std::shared_ptr<Result> res) : m_result(res) {};
-        virtual ~Sink() = default;
-
-       public:
-        auto init(QNetworkRequest& request) -> Task::State override;
-        auto write(QByteArray& data) -> Task::State override;
-        auto abort() -> Task::State override;
-        auto finalize(QNetworkReply& reply) -> Task::State override;
-        auto hasLocalData() -> bool override { return false; }
-
-       private:
-        std::shared_ptr<Result> m_result;
-        QByteArray m_output;
-    };
-
-    static Request::Ptr make(std::shared_ptr<Result> output, QList<ScreenShot::Ptr> screenshots);
-    QNetworkReply* getReply(QNetworkRequest& request) override;
+    void executeTask() override;
+    bool abort() override;
+    bool canAbort() const override { return true; }
+    void setWorkingDirectory(const QString& wd);
+   private slots:
+    void onState(LoggedProcess::State state);
 
    private:
-    QList<ScreenShot::Ptr> m_screenshots;
+    LoggedProcess m_process;
+    QString m_command;
+    QString m_phaseName;
 };
