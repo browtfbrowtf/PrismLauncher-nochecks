@@ -795,6 +795,7 @@ Application::Application(int& argc, char** argv) : QApplication(argc, argv)
         m_settings->registerSetting("SkipModpackUpdatePrompt", false);
         m_settings->registerSetting("ShowModIncompat", false);
         m_settings->registerSetting("DownloadGameFilesDuringInstanceCreation", true);
+        m_settings->registerSetting("ModUpdateReleaseTypes", "[]");
 
         // Minecraft offline player name
         m_settings->registerSetting("LastOfflinePlayerName", "");
@@ -1234,11 +1235,10 @@ Application::Application(int& argc, char** argv) : QApplication(argc, argv)
         installEventFilter(new ToolTipFilter);
     }
 
-    if (createSetupWizard()) {
-        return;
+    // the setup wizard applies the selected theme itself before it is shown
+    if (!createSetupWizard()) {
+        m_themeManager->applyCurrentlySelectedTheme(true);
     }
-
-    m_themeManager->applyCurrentlySelectedTheme(true);
     performMainStartupAction();
 }
 
@@ -1288,27 +1288,28 @@ bool Application::createSetupWizard()
 
         m_themeManager->applyCurrentlySelectedTheme(true);
 
-        m_setupWizard = new SetupWizard(nullptr);
+        SetupWizard setupWizard;
         if (languageRequired) {
-            m_setupWizard->addPage(new LanguageWizardPage(m_setupWizard));
+            setupWizard.addPage(new LanguageWizardPage(&setupWizard));
         }
 
         if (javaRequired) {
-            m_setupWizard->addPage(new JavaWizardPage(m_setupWizard));
+            setupWizard.addPage(new JavaWizardPage(&setupWizard));
         } else if (askjava) {
-            m_setupWizard->addPage(new AutoJavaWizardPage(m_setupWizard));
+            setupWizard.addPage(new AutoJavaWizardPage(&setupWizard));
         }
 
         if (pasteInterventionRequired) {
-            m_setupWizard->addPage(new PasteWizardPage(m_setupWizard));
+            setupWizard.addPage(new PasteWizardPage(&setupWizard));
         }
 
         if (themeInterventionRequired) {
-            m_setupWizard->addPage(new ThemeWizardPage(m_setupWizard));
+            setupWizard.addPage(new ThemeWizardPage(&setupWizard));
         }
 
-        connect(m_setupWizard, &QDialog::finished, this, &Application::setupWizardFinished);
-        m_setupWizard->show();
+        if (setupWizard.exec() != QDialog::Accepted) {
+            qWarning() << "Setup wizard was not completed; continuing with the current settings";
+        }
     }
 
     return wizardRequired;
@@ -1356,12 +1357,6 @@ bool Application::event(QEvent* event)
     }
 
     return QApplication::event(event);
-}
-
-void Application::setupWizardFinished(int status)
-{
-    qDebug() << "Wizard result =" << status;
-    performMainStartupAction();
 }
 
 void Application::performMainStartupAction()
@@ -1914,7 +1909,11 @@ QString Application::getJarPath(const QString& jarFile)
         FS::PathCombine(m_rootPath, "share", BuildConfig.LAUNCHER_NAME),
 #endif
         FS::PathCombine(m_rootPath, "jars"), FS::PathCombine(applicationDirPath(), "jars"),
+#if defined(Q_OS_MACOS)
+        FS::PathCombine(applicationDirPath(), "../../../..", "jars")  // from inside build dir, for debuging
+#else
         FS::PathCombine(applicationDirPath(), "..", "jars")  // from inside build dir, for debuging
+#endif
     };
     for (const auto& p : potentialPaths) {
         QString jarPath = FS::PathCombine(p, jarFile);
