@@ -34,6 +34,7 @@
  */
 
 #include "ExternalResourcesPage.h"
+#include "ui/MultiDecorationItemDelegate.h"
 #include "ui/dialogs/CustomMessageBox.h"
 #include "ui_ExternalResourcesPage.h"
 
@@ -46,42 +47,6 @@
 #include <QMenu>
 #include <QStyledItemDelegate>
 #include <algorithm>
-
-namespace {
-class LockDelegate : public QStyledItemDelegate {
-   public:
-    explicit LockDelegate(QObject* parent = nullptr) : QStyledItemDelegate(parent) {}
-
-    void paint(QPainter* painter, const QStyleOptionViewItem& opt, const QModelIndex& index) const override
-    {
-        QStyleOptionViewItem option(opt);
-        initStyleOption(&option, index);
-
-        bool locked = index.data(Qt::UserRole).toBool();
-
-        option.text.clear();
-        option.icon = QIcon::fromTheme(locked ? "lock" : "unlock");
-        option.features |= QStyleOptionViewItem::HasDecoration;
-        option.decorationAlignment = Qt::AlignBottom | Qt::AlignHCenter;
-        option.decorationPosition = QStyleOptionViewItem::Top;
-
-        int size = qMin(option.rect.width(), option.rect.height()) * 3 / 4;
-        option.decorationSize = QSize(size, size);
-
-        option.widget->style()->drawControl(QStyle::CE_ItemViewItem, &option, painter);
-    }
-
-    bool editorEvent(QEvent* event, QAbstractItemModel* model, const QStyleOptionViewItem& /*option*/, const QModelIndex& index) override
-    {
-        if (event->type() == QEvent::MouseButtonRelease) {
-            bool locked = index.data(Qt::UserRole).toBool();
-            model->setData(index, !locked, Qt::UserRole);
-            return true;
-        }
-        return event->type() == QEvent::MouseButtonDblClick;  // if double click ignore it
-    }
-};
-}  // namespace
 
 ExternalResourcesPage::ExternalResourcesPage(MinecraftInstance* instance, ResourceFolderModel* model, QWidget* parent)
     : QMainWindow(parent)
@@ -101,11 +66,12 @@ ExternalResourcesPage::ExternalResourcesPage(MinecraftInstance* instance, Resour
     m_filterModel->setFilterKeyColumn(-1);
     m_ui->treeView->setModel(m_filterModel);
 
-    // keep the Update at the end of the list(otherwise there will be a need to iterate over the columns)
-    auto lockColumn = static_cast<int>(model->columnNames(false).size()) - 1;
-    m_ui->treeView->setItemDelegateForColumn(lockColumn, new LockDelegate(m_ui->treeView));
+    m_ui->treeView->setItemDelegate(new MultiDecorationItemDelegate(this));
     // must come after setModel
-    m_ui->treeView->setResizeModes(m_model->columnResizeModes());
+    const auto& resizeModes = m_model->columnResizeModes();
+    for (int i = 0; i < resizeModes.count(); ++i) {
+        m_ui->treeView->header()->setSectionResizeMode(i, resizeModes[i]);
+    }
 
     m_ui->treeView->installEventFilter(this);
     m_ui->treeView->sortByColumn(1, Qt::AscendingOrder);
@@ -121,8 +87,8 @@ ExternalResourcesPage::ExternalResourcesPage(MinecraftInstance* instance, Resour
     connect(m_ui->actionViewConfigs, &QAction::triggered, this, &ExternalResourcesPage::viewConfigs);
     connect(m_ui->actionViewFolder, &QAction::triggered, this, &ExternalResourcesPage::viewFolder);
 
-    connect(m_ui->treeView, &ModListView::customContextMenuRequested, this, &ExternalResourcesPage::showContextMenu);
-    connect(m_ui->treeView, &ModListView::activated, this, &ExternalResourcesPage::itemActivated);
+    connect(m_ui->treeView, &QWidget::customContextMenuRequested, this, &ExternalResourcesPage::showContextMenu);
+    connect(m_ui->treeView, &QAbstractItemView::activated, this, &ExternalResourcesPage::itemActivated);
 
     connect(m_ui->actionLockUpdates, &QAction::triggered, this, &ExternalResourcesPage::lockUpdates);
     connect(m_ui->actionUnlockUpdates, &QAction::triggered, this, &ExternalResourcesPage::unlockUpdates);
@@ -152,11 +118,16 @@ ExternalResourcesPage::ExternalResourcesPage(MinecraftInstance* instance, Resour
     connect(m_model, &ResourceFolderModel::rowsInserted, this, [this] { updateActions(); });
     connect(m_model, &ResourceFolderModel::rowsRemoved, this, [this] { updateActions(); });
     connect(m_model, &ResourceFolderModel::dataChanged, this, [this] { updateActions(); });
+    connect(m_model, &ResourceFolderModel::sizeHintChanged, m_ui->treeView->itemDelegate(),
+            [this] { m_ui->treeView->itemDelegate()->sizeHintChanged(QModelIndex()); });
 
     auto* viewHeader = m_ui->treeView->header();
     viewHeader->setContextMenuPolicy(Qt::CustomContextMenu);
 
     connect(viewHeader, &QHeaderView::customContextMenuRequested, this, &ExternalResourcesPage::showHeaderContextMenu);
+
+    // always use the smallest possible size to avoid wasted space
+    m_ui->treeView->header()->resizeSection(0, 0);
 
     m_model->loadColumns(m_ui->treeView);
     connect(m_ui->treeView->header(), &QHeaderView::sectionResized, this, [this] { m_model->saveColumns(m_ui->treeView); });
@@ -235,6 +206,15 @@ bool ExternalResourcesPage::listFilter(QKeyEvent* keyEvent)
             break;
     }
     return QWidget::eventFilter(m_ui->treeView, keyEvent);
+}
+
+bool ExternalResourcesPage::event(QEvent* ev)
+{
+    if (ev->type() == QEvent::StyleChange) {
+        // NOTE: style can change minimum size
+        m_ui->treeView->header()->resizeSection(0, 0);
+    }
+    return true;
 }
 
 bool ExternalResourcesPage::eventFilter(QObject* obj, QEvent* ev)

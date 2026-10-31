@@ -35,6 +35,7 @@
 
 #include "MSALoginDialog.h"
 #include "Application.h"
+#include "Handle.h"
 #include "settings/SettingsObject.h"
 
 #include "ui_MSALoginDialog.h"
@@ -96,7 +97,7 @@ int MSALoginDialog::exec()
 {
     // Setup the login task and start it
     m_account = MinecraftAccount::createBlankMSA();
-    m_authflow_task = m_account->login(false);
+    m_authflow_task.reset(new AuthFlow(m_account->accountData(), AuthFlow::Action::Login));
     connect(m_authflow_task.get(), &Task::failed, this, &MSALoginDialog::onAuthFlowTaskFailed);
     connect(m_authflow_task.get(), &Task::succeeded, this, &QDialog::accept);
     connect(m_authflow_task.get(), &Task::aborted, this, &MSALoginDialog::reject);
@@ -166,7 +167,8 @@ void MSALoginDialog::authorizeWithBrowser(const QUrl& url)
 
 void paintQR(QPainter& painter, const QSize canvasSize, const QString& data, QColor fg)
 {
-    const auto* qr = QRcode_encodeString(data.toUtf8().constData(), 0, QRecLevel::QR_ECLEVEL_M, QRencodeMode::QR_MODE_8, 1);
+    Handle<QRcode, QRcode_free> qr{ QRcode_encodeString(data.toUtf8().constData(), 0, QRecLevel::QR_ECLEVEL_M, QRencodeMode::QR_MODE_8,
+                                                        1) };
     if (!qr) {
         qWarning() << "Unable to encode" << data << "as QR code";
         return;
@@ -203,10 +205,11 @@ void MSALoginDialog::authorizeWithBrowserWithExtra(QString url, QString code, [[
     ui->stackedWidget->updateGeometry();
     this->adjustSize();
 
-    const auto linkString = QString("<a href=\"%1\">%2</a>").arg(url, url);
+    const auto displayUrl = url;
     if (url == "https://www.microsoft.com/link" && !code.isEmpty()) {
         url += QString("?otc=%1").arg(code);
     }
+    const auto linkString = QString("<a href=\"%1\">%2</a>").arg(url, displayUrl);
     ui->code->setText(code);
 
     auto size = QSize(150, 150);

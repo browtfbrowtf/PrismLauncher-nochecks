@@ -24,9 +24,11 @@
 #include "minecraft/mod/tasks/LocalResourceUpdateTask.h"
 #include "modplatform/flame/FlameAPI.h"
 #include "modplatform/flame/FlameModIndex.h"
+#include "modplatform/flame/FlamePackIndex.h"
 #include "settings/Setting.h"
 #include "tasks/SequentialTask.h"
 #include "tasks/Task.h"
+#include "ui/MultiDecorationItemDelegate.h"
 #include "ui/dialogs/CustomMessageBox.h"
 
 ResourceFolderModel::ResourceFolderModel(const QDir& dir, MinecraftInstance* instance, bool isIndexed, bool createDir, QObject* parent)
@@ -187,22 +189,11 @@ void ResourceFolderModel::installResourceWithFlameMetadata(const QString& path, 
             .provider = ModPlatform::ResourceProvider::FLAME,
         };
 
-        auto [job, response] = FlameAPI::get().getProject(vers.addonId.toString());
+        auto [job, response] = FlameAPI::get().getProjectTask(vers.addonId.toString());
         connect(job.get(), &Task::failed, this, install);
         connect(job.get(), &Task::aborted, this, install);
-        connect(job.get(), &Task::succeeded, this, [response, this, &vers, install, &pack] {
-            auto obj = Json::requireObject(*response, "data");
-            if (!obj) {
-                qWarning() << "Error while parsing JSON response for mod info:" << obj.error();
-                qDebug() << *response;
-                return;
-            }
-            auto loadRes = FlameMod::loadIndexedPack(pack, *obj);
-            if (!loadRes) {
-                qDebug() << *obj;
-                qWarning() << "Error while reading mod info:" << loadRes.error();
-            }
-            LocalResourceUpdateTask updateMetadata(indexDir(), pack, vers);
+        connect(job.get(), &Task::succeeded, this, [response, this, vers, install, pack] {
+            LocalResourceUpdateTask updateMetadata(indexDir(), *response, vers);
             connect(&updateMetadata, &Task::finished, this, install);
             updateMetadata.start();
         });
@@ -572,13 +563,13 @@ QVariant ResourceFolderModel::data(const QModelIndex& index, int role) const
                 if (at(row).isSymLinkUnder(instDirPath())) {
                     tooltip +=
                         m_resources[row]->internalId() +
-                        tr("\nWarning: This resource is symbolically linked from elsewhere. Editing it will also change the original."
+                        tr("\nThis resource is symbolically linked from elsewhere. Editing it will also change the original."
                            "\nCanonical Path: %1")
                             .arg(at(row).fileinfo().canonicalFilePath());
                 }
 
                 if (at(row).isMoreThanOneHardLink()) {
-                    tooltip += tr("\nWarning: This resource is hard linked elsewhere. Editing it will also change the original.");
+                    tooltip += tr("\nThis resource is hard linked elsewhere. Editing it will also change the original.");
                 }
             }
 
@@ -586,14 +577,13 @@ QVariant ResourceFolderModel::data(const QModelIndex& index, int role) const
         }
         case Qt::DecorationRole: {
             if (column == NameColumn) {
-                if (APPLICATION->settings()->get("ShowModIncompat").toBool() && at(row).hasIssues()) {
-                    return QIcon::fromTheme("status-bad");
-                }
-                if (at(row).isSymLinkUnder(instDirPath()) || at(row).isMoreThanOneHardLink()) {
-                    return QIcon::fromTheme("status-yellow");
-                }
+                QVariant result;
+                result.setValue(icons(row));
+                return result;
             }
-
+            if (column == VersionColumn && at(row).lockUpdate()) {
+                return QIcon::fromTheme("status-locked");
+            }
             return {};
         }
         case Qt::CheckStateRole:
@@ -601,14 +591,30 @@ QVariant ResourceFolderModel::data(const QModelIndex& index, int role) const
                 return m_resources[row]->enabled() ? Qt::Checked : Qt::Unchecked;
             }
             return {};
-        case Qt::UserRole:
-            if (column == LockUpdateColumn) {
-                return at(row).lockUpdate();
+        case Qt::SizeHintRole:
+            if (m_showImages && supportsImage() && column == NameColumn) {
+                return QSize(0, 38);
             }
             return {};
         default:
             return {};
     }
+}
+
+QList<MultiDecorationItemDelegate::Icon> ResourceFolderModel::icons(int row) const
+{
+    QList<MultiDecorationItemDelegate::Icon> result;
+    static const QSize s_iconSize{ 16, 16 };
+
+    if (APPLICATION->settings()->get("ShowModIncompat").toBool() && at(row).hasIssues()) {
+        result.append({ .icon = QIcon::fromTheme("status-bad"), .size = s_iconSize });
+    }
+
+    if (at(row).isSymLinkUnder(instDirPath()) || at(row).isMoreThanOneHardLink()) {
+        result.append({ .icon = QIcon::fromTheme("status-linked"), .size = s_iconSize });
+    }
+
+    return result;
 }
 
 bool ResourceFolderModel::setData(const QModelIndex& index, [[maybe_unused]] const QVariant& value, int role)
@@ -640,7 +646,6 @@ QVariant ResourceFolderModel::headerData(int section, [[maybe_unused]] Qt::Orien
                 case ProviderColumn:
                 case SizeColumn:
                 case FileNameColumn:
-                case LockUpdateColumn:
                     return columnNames().at(section);
                 default:
                     return {};
@@ -663,8 +668,6 @@ QVariant ResourceFolderModel::headerData(int section, [[maybe_unused]] Qt::Orien
                     return tr("The size of the resource.");
                 case FileNameColumn:
                     return tr("The file name of the resource.");
-                case LockUpdateColumn:
-                    return tr("Should this mod be updated?");
                 default:
                     return {};
             }
@@ -700,6 +703,9 @@ void ResourceFolderModel::saveColumns(QTreeView* tree)
             visibility[name] = !tree->isColumnHidden(i);
         }
     }
+    if (supportsImage()) {
+        visibility["Image"] = m_showImages;
+    }
     settings->set(visibilitySettingName, Json::fromMap(visibility));
 
     const auto sizesSettingName = QString("UI/%1_Page/ColumnSizes").arg(id());
@@ -730,6 +736,8 @@ void ResourceFolderModel::loadColumns(QTreeView* tree)
             }
         }
         tree->header()->blockSignals(false);
+
+        m_showImages = visibility.value("Image").toBool();
     };
 
     const auto defaultValue = Json::fromMap({
@@ -751,7 +759,11 @@ void ResourceFolderModel::loadColumns(QTreeView* tree)
     auto gSetting = APPLICATION->settings()->getOrRegisterSetting(visibilitySettingName, defaultValue);
     connect(gSetting.get(), &Setting::SettingChanged, tree, [this, setVisible, overrideSettingName](const Setting&, const QVariant& value) {
         if (!m_instance->settings()->get(overrideSettingName).toBool()) {
+            bool prevShowImages = m_showImages;
             setVisible(value);
+            if (prevShowImages != m_showImages) {
+                emit sizeHintChanged();
+            }
         }
     });
 
@@ -796,6 +808,20 @@ QMenu* ResourceFolderModel::createHeaderContextMenu(QTreeView* tree)
     }
     menu->addSeparator()->setText(tr("Show / Hide Columns"));
 
+    if (supportsImage()) {
+        auto* imageAction = new QAction(tr("Image"));
+        imageAction->setCheckable(true);
+        imageAction->setChecked(m_showImages);
+
+        connect(imageAction, &QAction::toggled, tree, [this, tree](bool toggled) {
+            m_showImages = toggled;
+            emit sizeHintChanged();
+            saveColumns(tree);
+        });
+
+        menu->addAction(imageAction);
+    }
+
     for (int col = 0; col < columnCount(); ++col) {
         // Skip creating actions for columns that should not be hidden
         if (!m_columnsHideable.at(col)) {
@@ -816,6 +842,7 @@ QMenu* ResourceFolderModel::createHeaderContextMenu(QTreeView* tree)
                 }
             }
             tree->header()->blockSignals(false);
+            tree->doItemsLayout();
             saveColumns(tree);
         });
 
@@ -1044,9 +1071,9 @@ bool ResourceFolderModel::setUpdateLock(const QModelIndexList& indexes, EnableAc
     }
 
     bool succeeded = true;
-    auto updateColumn = static_cast<int>(columnNames(false).indexOf("Update"));
+    auto versionColumn = static_cast<int>(columnNames(false).indexOf("Version"));
     for (const auto& idx : indexes) {
-        if (!validateIndex(idx) || idx.column() != updateColumn) {
+        if (!validateIndex(idx) || idx.column() != 0) {
             continue;
         }
 
@@ -1077,7 +1104,10 @@ bool ResourceFolderModel::setUpdateLock(const QModelIndexList& indexes, EnableAc
             meta->lockUpdate = lockUpdate;
             Metadata::update(indexDir(), *meta.get());
             resource->setMetadata(*meta.get());
-            emit dataChanged(index(row, updateColumn), index(row, columnCount(QModelIndex()) - 1));
+
+            if (versionColumn != -1) {
+                emit dataChanged(index(row, versionColumn), index(row, versionColumn));
+            }
         }
     }
 
